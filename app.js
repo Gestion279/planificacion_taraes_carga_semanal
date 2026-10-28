@@ -28,6 +28,7 @@ const S = {
   pendiente: false,
   timer: null,
   avisoOculto: false,
+  verTodas: false,
   npAbierto: false,
   admin: { usuarios: null, texto: '', tipo: '', estado: 'activos', editando: null }
 };
@@ -50,6 +51,8 @@ const fmtH = (n) => `${(Math.round((n || 0) * 100) / 100).toLocaleString('es-AR'
 const hora = (ts) => new Date(ts).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 const fechaHora = (ts) => { const d = new Date(ts); return `${ddmm(aIso(d))} a las ${hora(ts)}`; };
 const uid = () => Math.random().toString(36).slice(2, 10);
+// Quita espacios y caracteres invisibles que se cuelan al copiar el correo de un mail, PDF o Excel
+const normCorreo = (v) => String(v || '').normalize('NFKC').replace(/[\s\u00a0\u1680\u180e\u2000-\u200f\u2028\u2029\u202f\u205f\u2060\u3000\ufeff]/g, '').toLowerCase();
 
 function toast(msg, error = false) {
   $toast.textContent = msg;
@@ -122,7 +125,7 @@ function marco(contenido, actual = '') {
     </nav>` : '';
   $app.innerHTML = `
     <header class="barra">
-      <a class="marca" href="#/semanas"><img src="/icons/icon-192.png" alt="">Planificación · Carga semanal</a>
+      <a class="marca" href="#/semanas"><img src="/icons/icon.svg" alt="" width="30" height="30">Planificación · Carga semanal</a>
       ${nav}
     </header>
     ${contenido}`;
@@ -162,7 +165,7 @@ function vistaIngreso(error = '') {
           <p style="color:var(--tenue)">Escribí tu correo de la empresa para cargar tu planificación.</p>
         </div>
         <label class="campo grande">Correo electrónico
-          <input class="in" type="email" name="correo" inputmode="email" autocomplete="email" required ${error ? 'aria-invalid="true" aria-describedby="err-ingreso"' : ''}>
+          <input class="in" type="email" name="correo" inputmode="email" autocomplete="email" autocapitalize="none" autocorrect="off" spellcheck="false" required ${error ? 'aria-invalid="true" aria-describedby="err-ingreso"' : ''}>
         </label>
         ${error ? `<p class="error-texto" id="err-ingreso">${esc(error)}</p>` : ''}
         <button type="submit" class="btn btn-p" style="min-height:48px;font-size:16px">Ingresar</button>
@@ -173,8 +176,8 @@ function vistaIngreso(error = '') {
   if (input) input.focus();
 }
 async function ingresar(form) {
-  const valor = form.elements.correo.value.trim();
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(valor)) return vistaIngreso('Revisá el correo: no parece válido.');
+  const valor = normCorreo(form.elements.correo.value);
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(valor)) return vistaIngreso('Revisá el correo: falta la @ o el dominio (por ejemplo, nombre@fabricasrl.com.ar).');
   const btn = form.querySelector('button[type=submit]');
   btn.disabled = true; btn.textContent = 'Ingresando…';
   try {
@@ -227,12 +230,15 @@ async function vistaSemanas() {
         <button type="button" class="btn" data-accion="aviso-mas-tarde">Más tarde</button>
       </div>
     </section>` : '';
-  const lista = S.semanas.length ? S.semanas.map((s) => {
+  const VISIBLES = 6;
+  const lista = S.semanas.length ? S.semanas.map((s, i) => {
     const e = estadoSemana(s);
-    return `<a class="item-semana" href="#/semana/${s.fecha_inicio}/${s.fecha_fin}">
+    return `<a class="item-semana" href="#/semana/${s.fecha_inicio}/${s.fecha_fin}" ${i >= VISIBLES && !S.verTodas ? 'hidden' : ''}>
       <span><span class="rango">${ddmm(s.fecha_inicio)} al ${ddmm(s.fecha_fin)}</span><span class="det">${esc(detalleSemana(s))}</span></span>
       <span class="chip ${e.clase}">${e.texto}</span></a>`;
-  }).join('') : '<p class="vacio">Todavía no hay semanas cargadas.</p>';
+  }).join('') + (S.semanas.length > VISIBLES && !S.verTodas
+    ? `<button type="button" class="btn btn-chico" data-accion="ver-todas" style="margin-top:12px">Ver todas las semanas (${S.semanas.length})</button>` : '')
+    : '<p class="vacio">Todavía no hay semanas cargadas.</p>';
 
   marco(`
     <main class="contenido angosto">
@@ -257,7 +263,7 @@ async function vistaSemanas() {
           <button type="submit" class="btn btn-p" style="min-height:48px;font-size:16px">Entrar</button>
         </form>
         <section class="tarjeta mias" aria-labelledby="t-mias">
-          <h2 id="t-mias">Tus semanas</h2>
+          <h2 id="t-mias">Tus semanas${S.semanas.length ? ` <span style="font-weight:500;color:var(--tenue);font-size:14px">· ${S.semanas.length}</span>` : ''}</h2>
           ${lista}
         </section>
       </div>
@@ -957,6 +963,11 @@ $app.addEventListener('click', async (e) => {
   switch (a) {
     case 'salir': await guardarSiHaceFalta(); cerrarSesion(); break;
     case 'reintentar': render(); break;
+    case 'ver-todas':
+      S.verTodas = true;
+      $app.querySelectorAll('.item-semana[hidden]').forEach((x) => { x.hidden = false; });
+      b.remove();
+      break;
     case 'aviso-mas-tarde': S.avisoOculto = true; b.closest('.aviso').remove(); break;
     case 'dia':
       S.dia = Number(b.dataset.i); S.npAbierto = false;

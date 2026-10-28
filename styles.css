@@ -61,7 +61,7 @@ p { margin: 0; }
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 24px;
 }
 .marca { display: flex; align-items: center; gap: 12px; font-size: 17px; font-weight: 600; color: #FFFFFF; text-decoration: none; }
-.marca img { width: 28px; height: 28px; border-radius: 6px; }
+.marca img { width: 30px; height: 30px; flex: none; background: #FFFFFF; border-radius: 7px; padding: 2px; }
 .nav { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; font-size: 14px; }
 .nav a, .nav button { color: #FFFFFF; background: none; border: 0; font: inherit; padding: 8px 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: rgba(255,255,255,.5); }
 .nav a[aria-current="page"] { font-weight: 700; text-decoration-color: #FFFFFF; }
