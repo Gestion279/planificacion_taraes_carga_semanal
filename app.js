@@ -126,6 +126,7 @@ function marco(contenido, actual = '') {
   $app.innerHTML = `
     <header class="barra">
       <a class="marca" href="#/semanas"><img src="/icons/icon.svg" alt="" width="30" height="30">Planificación · Carga semanal</a>
+      ${s ? `<a class="btn-inicio" href="#/semanas" data-accion="inicio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 9.5V20h13V9.5"/><path d="M10 20v-5h4v5"/></svg>Página de Inicio</a>` : ''}
       ${nav}
     </header>
     ${contenido}`;
@@ -962,6 +963,12 @@ $app.addEventListener('click', async (e) => {
   const fila = b.closest('[data-uid]');
   switch (a) {
     case 'salir': await guardarSiHaceFalta(); cerrarSesion(); break;
+    case 'inicio':
+      // Si ya está en la página de inicio, el enlace no cambiaría nada: la recarga y sube al principio
+      if (location.hash === '#/semanas' || location.hash === '' || location.hash === '#/') {
+        e.preventDefault(); window.scrollTo({ top: 0 }); render();
+      }
+      break;
     case 'reintentar': render(); break;
     case 'ver-todas':
       S.verTodas = true;
