@@ -292,6 +292,7 @@ async function abrirSemana(ini, fin, mantenerDia = false) {
     S.filas = prepararFilas(sem);
     vistaBorrador();
   } else {
+    if (!(mantenerDia && mismo)) S.dia = Math.max(0, diasCumplimiento().indexOf(sem.fecha_inicio));
     vistaCumplimiento();
   }
 }
@@ -590,9 +591,15 @@ function chipPct(p) {
   const [bg, fg] = p < 25 ? ['var(--rojo)', '#fff'] : p < 50 ? ['var(--naranja)', 'var(--tinta)'] : p < 75 ? ['var(--amarillo)', 'var(--tinta)'] : ['var(--verde)', '#fff'];
   return `<span class="pct" style="background:${bg};color:${fg}">${p}%</span>`;
 }
+// Muestra siempre de lunes a viernes, aunque la planificación confirmada abarque menos días,
+// para poder cargar tareas no planificadas en un día que no se planificó.
+// El sábado y el domingo aparecen si estaban en la planificación o si ya tienen tareas.
 function diasCumplimiento() {
-  const dias = rango(S.semana.fecha_inicio, S.semana.fecha_fin);
-  (S.semana.tareas || []).forEach((t) => { if (t.fecha && !dias.includes(t.fecha)) dias.push(t.fecha); });
+  const lunes = lunesDe(S.semana.fecha_inicio);
+  const dias = rango(lunes, sumarDias(lunes, 4));
+  const sumar = (d) => { if (d && !dias.includes(d)) dias.push(d); };
+  rango(S.semana.fecha_inicio, S.semana.fecha_fin).forEach(sumar);
+  (S.semana.tareas || []).forEach((t) => sumar(t.fecha));
   dias.sort();
   return dias;
 }
@@ -677,7 +684,7 @@ function vistaCumplimiento() {
           const ev = l.filter((t) => t.cumplimiento).length;
           return `<button type="button" class="dia" data-accion="dia" data-i="${i}" aria-current="${i === S.dia}">
             <span class="nombre"><span>${window.innerWidth <= 760 ? cortoDia(d) : nombreDia(d)}</span>${chipPct(cumplimientoDe(l))}</span>
-            <span class="res">${l.length ? `${ev} de ${l.length} evaluadas` : 'Sin tareas'}</span></button>`;
+            <span class="res">${l.length ? `${ev} de ${l.length} evaluadas` : 'Sin tareas planificadas'}</span></button>`;
         }).join('')}
       </nav>
       <section class="panel" aria-labelledby="t-dia">
@@ -685,8 +692,13 @@ function vistaCumplimiento() {
           <h2 id="t-dia">${nombreDia(dia)}</h2>
           <span>Planificado <strong>${fmtH(delDia.reduce((s, t) => s + (Number(t.horas_planificadas) || 0), 0))}</strong> · Real <strong>${fmtH(delDia.reduce((s, t) => s + (Number(t.horas_reales) || 0), 0))}</strong></span>
         </div>
-        ${delDia.length ? delDia.map(filaCumplimientoHtml).join('') : '<p class="tarjeta" style="padding:16px;color:var(--tenue)">No hay tareas planificadas para este día.</p>'}
-        ${S.npAbierto ? formularioNoPlanificada() : `<div class="herramientas"><button type="button" class="btn btn-linea" data-accion="abrir-np" ${dia > hoy ? 'title="Podés agregarla aunque el día no haya llegado"' : ''}>+ Agregar tarea no planificada</button></div>`}
+        ${delDia.length ? delDia.map(filaCumplimientoHtml).join('') : S.npAbierto ? '' : `
+        <div class="tarjeta dia-vacio">
+          <strong>No se planificaron tareas para este día</strong>
+          <p>Si trabajaste en algo, cargalo como tarea no planificada. Va a sumar a las horas reales y al cumplimiento de la semana.</p>
+          <button type="button" class="btn btn-p" data-accion="abrir-np">+ Agregar tarea no planificada</button>
+        </div>`}
+        ${S.npAbierto ? formularioNoPlanificada() : delDia.length ? `<div class="herramientas"><button type="button" class="btn btn-linea" data-accion="abrir-np" ${dia > hoy ? 'title="Podés agregarla aunque el día no haya llegado"' : ''}>+ Agregar tarea no planificada</button></div>` : ''}
         <p class="nota-fija">La acción, el detalle y las horas planificadas no se pueden cambiar después de confirmar.</p>
       </section>
     </div>

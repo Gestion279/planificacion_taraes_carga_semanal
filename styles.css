@@ -290,3 +290,10 @@ dialog.dialogo::backdrop { background: rgba(43,52,54,.45); }
   .usuario-form { max-width: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
+
+/* Día sin tareas planificadas en la vista de cumplimiento */
+.dia-vacio { padding: 28px 20px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.dia-vacio strong { font-size: 17px; }
+.dia-vacio p { margin: 0; max-width: 460px; font-size: 14px; line-height: 1.5; color: var(--tenue); }
+.dia-vacio .btn { margin-top: 4px; min-height: 46px; }
+@media (max-width: 760px) { .dia-vacio .btn { width: 100%; } }
