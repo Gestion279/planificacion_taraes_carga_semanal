@@ -30,6 +30,7 @@ const S = {
   avisoOculto: false,
   verTodas: false,
   npAbierto: false,
+  desLunes: null,
   admin: { usuarios: null, texto: '', tipo: '', estado: 'activos', editando: null }
 };
 
@@ -120,6 +121,7 @@ function marco(contenido, actual = '') {
     <nav class="nav" aria-label="Cuenta">
       <span class="quien">${esc(s.nombre)} · ${esc(s.tipo || '')}</span>
       <a href="#/semanas" ${actual === 'semanas' ? 'aria-current="page"' : ''}>Mis semanas</a>
+      <a href="#/desempeno" ${actual === 'desempeno' ? 'aria-current="page"' : ''}>Mi desempeño</a>
       ${s.es_admin ? `<a href="#/usuarios" ${actual === 'usuarios' ? 'aria-current="page"' : ''}>Usuarios</a>` : ''}
       <button type="button" data-accion="salir">Salir</button>
     </nav>` : '';
@@ -149,6 +151,7 @@ async function render() {
     if (!S.acciones.length) S.acciones = await leerAcciones();
     if (r === 'semana' && a && b) return await abrirSemana(a, b);
     if (r === 'usuarios' && S.sesion.es_admin) return await vistaUsuarios();
+    if (r === 'desempeno') return await vistaDesempeno();
     return await vistaSemanas();
   } catch (e) {
     errorPantalla(e.message);
@@ -747,6 +750,46 @@ async function agregarNoPlanificada(form) {
   }
 }
 
+/* ---------- mi desempeño ---------- */
+// Usa desempeno.js (window.Desempeno), el mismo archivo que la hoja Desempeño del informe.
+function semanaPorDefecto(lista) {
+  // La última semana ya terminada; si no hay, la más reciente.
+  const lunesHoy = lunesDe(hoyIso());
+  return lista.find((s) => s.lunes < lunesHoy) || lista[0];
+}
+async function vistaDesempeno() {
+  cargando('Armando tu desempeño…');
+  const [semanas, evaluaciones] = await Promise.all([
+    rpc('cargar_mis_semanas', { p_correo: correo() }),
+    rpc('cargar_mis_evaluaciones', { p_correo: correo() })
+  ]);
+  const conf = semanas.filter((s) => s.estado === 'confirmada');
+  if (!conf.length) {
+    marco(`<main class="contenido angosto"><div class="des-enc"><div><h1>Mi desempeño</h1></div></div>
+      <div class="tarjeta des-vacio">Todavía no tenés semanas confirmadas. Cuando confirmes tu primera planificación, acá vas a ver cómo te fue y el feedback de los evaluadores.
+      <div style="margin-top:16px"><a class="btn btn-p" href="#/semanas">Planificar una semana</a></div></div></main>`, 'desempeno');
+    return;
+  }
+  const sel = conf.find((s) => s.lunes === S.desLunes) || semanaPorDefecto(conf);
+  S.desLunes = sel.lunes;
+  const semana = await rpc('cargar_semana', { p_correo: correo(), p_inicio: sel.fecha_inicio, p_fin: sel.fecha_fin });
+  const opciones = conf.map((s) => `<option value="${s.lunes}" ${s.lunes === sel.lunes ? 'selected' : ''}>${ddmm(s.fecha_inicio)} al ${ddmm(s.fecha_fin)} · ${estadoSemana(s).texto.toLowerCase()}</option>`).join('');
+  marco(`
+    <main class="contenido">
+      <div class="des-enc">
+        <div><h1>Mi desempeño</h1><p class="sub">Cómo te fue en la semana y qué te dicen los evaluadores.</p></div>
+        <label class="campo grande">Semana<select class="in" data-des-semana>${opciones}</select></label>
+      </div>
+      ${Desempeno.vista({
+        semanas: conf, lunes: sel.lunes, semana,
+        evaluaciones: evaluaciones.filter((e) => e.semana_inicio === sel.lunes),
+        jornada: Number(S.sesion.jornada_horas) || 44,
+        modo: 'persona',
+        enlaceSemana: `#/semana/${sel.fecha_inicio}/${sel.fecha_fin}`
+      })}
+    </main>`, 'desempeno');
+}
+
 /* ---------- usuarios (administrador) ---------- */
 function claveAdmin() { try { return sessionStorage.getItem(CLAVE_ADMIN); } catch { return null; } }
 async function vistaUsuarios(error = '') {
@@ -800,19 +843,19 @@ function filasUsuarios() {
 function pintarUsuarios() {
   const us = S.admin.usuarios || [];
   const act = us.filter((u) => u.activo);
-  const g = act.filter((u) => u.tipo === 'Gestión').length, p = act.filter((u) => u.tipo === 'Producción').length;
+  const g = act.filter((u) => u.tipo === 'Gestión').length, p = act.filter((u) => u.tipo === 'Producción').length, ge = act.filter((u) => u.tipo === 'Gerencia').length;
   marco(`
   <main class="contenido">
     <div class="titulo" style="display:flex;flex-direction:column;gap:6px">
       <h1 style="font-size:24px">Usuarios</h1>
-      <span style="font-size:14px;color:var(--tenue)">${act.length} usuarios activos · ${g} de Gestión y ${p} de Producción.</span>
+      <span style="font-size:14px;color:var(--tenue)">${act.length} usuarios activos · ${g} de Gestión, ${p} de Producción y ${ge} de Gerencia (evaluadores, no planifican).</span>
     </div>
     <div class="layout">
       <section class="tarjeta usuarios-lista" aria-label="Lista de usuarios">
         <div class="filtros">
           <label class="campo">Buscar<input class="in" type="search" data-filtro="texto" value="${esc(S.admin.texto)}" placeholder="Nombre o correo"></label>
           <label class="campo">Tipo<select class="in" data-filtro="tipo">
-            ${[['', 'Todos'], ['Gestión', 'Gestión'], ['Producción', 'Producción']].map(([v, l]) => `<option value="${v}" ${S.admin.tipo === v ? 'selected' : ''}>${l}</option>`).join('')}
+            ${[['', 'Todos'], ['Gestión', 'Gestión'], ['Producción', 'Producción'], ['Gerencia', 'Gerencia']].map(([v, l]) => `<option value="${v}" ${S.admin.tipo === v ? 'selected' : ''}>${l}</option>`).join('')}
           </select></label>
           <label class="campo">Estado<select class="in" data-filtro="estado">
             ${[['activos', 'Activos'], ['inactivos', 'Inactivos'], ['todos', 'Todos']].map(([v, l]) => `<option value="${v}" ${S.admin.estado === v ? 'selected' : ''}>${l}</option>`).join('')}
@@ -829,7 +872,7 @@ function pintarUsuarios() {
         <h2 id="t-nuevo">Agregar usuario</h2>
         <label class="campo grande">Nombre y apellido<input class="in" name="nombre" type="text" autocomplete="off" required></label>
         <label class="campo grande">Correo<input class="in" name="correo" type="email" inputmode="email" autocomplete="off" required></label>
-        <label class="campo grande">Tipo<select class="in" name="tipo" required><option value="">Elegí el tipo</option><option>Gestión</option><option>Producción</option></select></label>
+        <label class="campo grande">Tipo<select class="in" name="tipo" required><option value="">Elegí el tipo</option><option>Gestión</option><option>Producción</option><option>Gerencia</option></select></label>
         <p class="error-texto" data-error hidden></p>
         <button type="submit" class="btn btn-p" style="min-height:46px">Agregar usuario</button>
         <p class="nota">Si un correo de sector pasa a otra persona, desactivá el usuario anterior y agregá uno nuevo con el mismo correo. Así el historial queda asignado a quien lo cargó.</p>
@@ -865,7 +908,7 @@ async function editarUsuario(id) {
     cuerpo: `
       <label class="campo grande">Nombre y apellido<input class="in" name="nombre" type="text" value="${esc(u.nombre)}" required></label>
       <label class="campo grande">Correo<input class="in" name="correo" type="email" value="${esc(u.correo || '')}" required></label>
-      <label class="campo grande">Tipo<select class="in" name="tipo">${['Gestión', 'Producción'].map((t) => `<option ${u.tipo === t ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+      <label class="campo grande">Tipo<select class="in" name="tipo">${['Gestión', 'Producción', 'Gerencia'].map((t) => `<option ${u.tipo === t ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
       <label class="check"><input type="checkbox" name="activo" ${u.activo ? 'checked' : ''} ${propio ? 'disabled' : ''}> Usuario activo</label>
       ${propio ? '<p class="ayuda">No podés desactivar tu propio usuario.</p>' : ''}`,
     ok: 'Guardar cambios'
@@ -936,6 +979,7 @@ $app.addEventListener('input', (e) => {
 
 $app.addEventListener('change', (e) => {
   const el = e.target;
+  if (el.matches('[data-des-semana]')) { S.desLunes = el.value; vistaDesempeno().catch((err) => errorPantalla(err.message)); return; }
   if (el.dataset.campo === 'accion_id') {
     const fila = el.closest('[data-uid]');
     const ay = fila && fila.querySelector('[data-ayuda]');
@@ -1042,7 +1086,7 @@ $app.addEventListener('click', async (e) => {
     // Se revalida en segundo plano: si el correo fue desactivado, se cierra la sesión.
     rpc('cargar_ingresar', { p_correo: S.sesion.correo })
       .then((p) => { const cambio = p.es_admin !== S.sesion.es_admin || p.nombre !== S.sesion.nombre; guardarSesion(p); if (cambio) render(); })
-      .catch((e) => { if (/no está habilitado/.test(e.message)) { cerrarSesion(); toast(e.message, true); } });
+      .catch((e) => { if (/no está habilitado|Gerencia/.test(e.message)) { cerrarSesion(); toast(e.message, true); } });
     if (!location.hash || location.hash === '#/') { location.hash = '#/semanas'; return; }
   }
   render();
