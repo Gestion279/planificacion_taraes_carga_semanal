@@ -300,7 +300,7 @@ async function abrirSemana(ini, fin, mantenerDia = false) {
   }
 }
 const diasSemana = () => rango(S.semana.fecha_inicio, S.semana.fecha_fin);
-const filaVacia = (fecha) => ({ uid: uid(), fecha, accion_id: '', detalle: '', prioridad: '', horas: '', recursos: '', riesgos: '', cumplimiento: '', abierta: false });
+const filaVacia = (fecha) => ({ uid: uid(), fecha, accion_id: '', detalle: '', prioridad: '', horas: '', recursos: '', riesgos: '', cumplimiento: '', horas_reales: '', abierta: false });
 /* Cumplimiento precargado en el borrador (por ejemplo, el que traen las tareas copiadas de otra semana).
    Solo se aceptan porcentajes: una tarea copiada empieza la semana nueva, no puede venir "reprogramada".
    Se guarda también en este navegador por si la base no conserva ese dato en el borrador. */
@@ -320,13 +320,13 @@ function leerCumplLocal() {
   try { const t = localStorage.getItem(claveCumplLocal()); return t ? JSON.parse(t) : {}; } catch { return {}; }
 }
 function borrarCumplLocal() { try { localStorage.removeItem(claveCumplLocal()); } catch { /* nada */ } }
-const filaConDatos = (f) => !!(f.accion_id || (f.detalle || '').trim() || String(f.horas || '').trim() || (f.recursos || '').trim() || (f.riesgos || '').trim());
+const filaConDatos = (f) => !!(f.accion_id || (f.detalle || '').trim() || String(f.horas || '').trim() || String(f.horas_reales || '').trim() || (f.recursos || '').trim() || (f.riesgos || '').trim());
 function prepararFilas(sem) {
   const dias = rango(sem.fecha_inicio, sem.fecha_fin);
   const filas = (sem.tareas || []).filter((t) => dias.includes(t.fecha)).map((t) => ({
     uid: uid(), fecha: t.fecha, accion_id: t.accion_id ? String(t.accion_id) : '', detalle: t.detalle || '',
     prioridad: t.prioridad || '', horas: t.horas ?? '', recursos: t.recursos || '', riesgos: t.riesgos || '',
-    cumplimiento: pctValido(t.cumplimiento),
+    cumplimiento: pctValido(t.cumplimiento), horas_reales: t.horas_reales ?? '',
     abierta: !!((t.recursos || '').trim() || (t.riesgos || '').trim())
   }));
   // Si la base no devolvió el cumplimiento precargado, se recupera del guardado local
@@ -346,6 +346,11 @@ function ordenarFilas() {
   const dias = diasSemana();
   S.filas.sort((a, b) => dias.indexOf(a.fecha) - dias.indexOf(b.fecha));
 }
+// Planificado cumplido en el borrador: horas de cada tarea con acción por su porcentaje
+const cumplidoBorrador = (lista) => lista.filter((f) => f.accion_id).reduce((t, f) => {
+  const h = num(f.horas); return t + (Number.isFinite(h) && h > 0 ? h * (Number(f.cumplimiento) || 0) / 100 : 0);
+}, 0);
+const realesBorrador = (lista) => lista.reduce((t, f) => { const h = num(f.horas_reales); return t + (Number.isFinite(h) && h > 0 ? h : 0); }, 0);
 const horasDe = (lista) => lista.reduce((t, f) => { const h = num(f.horas); return t + (Number.isFinite(h) && h > 0 ? h : 0); }, 0);
 
 /* ---------- borrador ---------- */
@@ -374,6 +379,9 @@ function filaBorradorHtml(f, i) {
       </label>
       <label class="campo f-horas">Horas
         <input class="in" type="text" inputmode="decimal" data-campo="horas" value="${esc(f.horas)}" placeholder="0" autocomplete="off">
+      </label>
+      <label class="campo f-horas">Reales
+        <input class="in" type="text" inputmode="decimal" data-campo="horas_reales" value="${esc(f.horas_reales)}" placeholder="—" autocomplete="off">
       </label>
       <label class="campo f-cumpl">Cumplimiento
         <select class="in" data-campo="cumplimiento">
@@ -436,7 +444,7 @@ function vistaBorrador(foco) {
       <section class="panel" aria-labelledby="t-dia">
         <div class="panel-cab">
           <h2 id="t-dia">${nombreDia(dia)}</h2>
-          <span>Total del día: <strong data-total-dia>${fmtH(horasDe(filasDia.filter((f) => f.accion_id)))}</strong></span>
+          <span>Planificado <strong data-total-dia>${fmtH(horasDe(filasDia.filter((f) => f.accion_id)))}</strong> · Planificado cumplido <strong data-cumplido-dia>${fmtH(cumplidoBorrador(filasDia))}</strong> · Real <strong data-real-dia>${fmtH(realesBorrador(filasDia))}</strong></span>
         </div>
         ${filasDia.map((f, i) => filaBorradorHtml(f, i)).join('')}
         <div class="herramientas">
@@ -462,6 +470,8 @@ function actualizarTotales() {
   const t = (sel, v) => { const el = $app.querySelector(sel); if (el) el.textContent = v; };
   t('[data-total-semana]', fmtH(horasDe(S.filas.filter((f) => f.accion_id))));
   t('[data-total-dia]', fmtH(horasDe(S.filas.filter((f) => f.fecha === dia && f.accion_id))));
+  t('[data-cumplido-dia]', fmtH(cumplidoBorrador(S.filas.filter((f) => f.fecha === dia))));
+  t('[data-real-dia]', fmtH(realesBorrador(S.filas.filter((f) => f.fecha === dia))));
   dias.forEach((d) => {
     const lista = S.filas.filter((f) => f.fecha === d && f.accion_id);
     t(`[data-res-dia="${d}"]`, `${lista.length} ${lista.length === 1 ? 'tarea' : 'tareas'} · ${fmtH(horasDe(lista))}`);
@@ -482,7 +492,8 @@ function payloadFilas() {
   return S.filas.filter(filaConDatos).map((f) => ({
     fecha: f.fecha, accion_id: f.accion_id ? Number(f.accion_id) : '', detalle: f.detalle.trim(),
     prioridad: f.prioridad, horas: String(f.horas).trim(), recursos: f.recursos.trim(), riesgos: f.riesgos.trim(),
-    cumplimiento: f.cumplimiento || null
+    cumplimiento: f.cumplimiento || null,
+    horas_reales: String(f.horas_reales ?? '').trim()
   }));
 }
 async function guardarBorrador(avisar = false) {
@@ -509,7 +520,7 @@ window.addEventListener('pagehide', () => { if (S.pendiente) guardarBorrador(); 
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && S.pendiente) guardarBorrador(); });
 
 function copiarFila(f, fecha) {
-  return { ...f, uid: uid(), fecha };
+  return { ...f, uid: uid(), fecha, horas_reales: '' };
 }
 function reemplazarVacias(fecha, nuevas) {
   const llenas = S.filas.filter((f) => f.fecha === fecha && filaConDatos(f));
@@ -571,7 +582,7 @@ async function copiarSemana() {
       (porDia[destino] = porDia[destino] || []).push({
         uid: uid(), fecha: destino, accion_id: t.accion_id ? String(t.accion_id) : '', detalle: t.detalle || '',
         prioridad: t.prioridad || '', horas: t.horas_planificadas ?? t.horas ?? '', recursos: t.recursos || '', riesgos: t.riesgos || '',
-        cumplimiento: pctValido(t.cumplimiento),
+        cumplimiento: pctValido(t.cumplimiento), horas_reales: '',
         abierta: !!((t.recursos || '').trim() || (t.riesgos || '').trim())
       });
     });
@@ -596,12 +607,14 @@ async function aplicarCumplimientoPrecargado(filas) {
       const i = libres.findIndex((t) => claveFila({ fecha: t.fecha, accion_id: t.accion_id, detalle: t.detalle }) === claveFila(f));
       if (i < 0) { fallidas++; continue; }
       const t = libres.splice(i, 1)[0];
-      if (String(t.cumplimiento ?? '') === f.cumplimiento) continue;
+      const real = num(f.horas_reales);
+      const nuevoReal = Number.isFinite(real) && real >= 0 ? real : (t.horas_reales === '' || t.horas_reales === undefined ? null : t.horas_reales);
+      const nuevoCumpl = f.cumplimiento || t.cumplimiento || null;
+      if (String(t.cumplimiento ?? '') === String(nuevoCumpl ?? '') && Number(t.horas_reales ?? -1) === Number(nuevoReal ?? -1)) continue;
       try {
         await rpc('cargar_actualizar_tarea', {
           p_correo: correo(), p_id: t.id, p_prioridad: t.prioridad || null,
-          p_horas_reales: t.horas_reales === '' || t.horas_reales === undefined ? null : t.horas_reales,
-          p_cumplimiento: f.cumplimiento
+          p_horas_reales: nuevoReal, p_cumplimiento: nuevoCumpl
         });
       } catch { fallidas++; }
     }
@@ -611,7 +624,7 @@ async function aplicarCumplimientoPrecargado(filas) {
 async function confirmarSemana() {
   const conAccion = S.filas.filter((f) => f.accion_id);
   const sinAccion = S.filas.filter((f) => !f.accion_id && filaConDatos(f));
-  const malas = conAccion.filter((f) => { const h = num(f.horas); return Number.isNaN(h) || h < 0; });
+  const malas = conAccion.filter((f) => [num(f.horas), num(f.horas_reales)].some((h) => Number.isNaN(h) || h < 0));
   if (malas.length) {
     const f = malas[0];
     S.dia = diasSemana().indexOf(f.fecha); vistaBorrador(f.uid);
@@ -630,14 +643,14 @@ async function confirmarSemana() {
   clearTimeout(S.timer);
   try {
     cargando('Confirmando la planificación…');
-    const conCumpl = conAccion.filter((f) => f.cumplimiento);
+    const conCumpl = conAccion.filter((f) => f.cumplimiento || num(f.horas_reales) !== null);
     await rpc('cargar_confirmar', { p_correo: correo(), p_inicio: S.semana.fecha_inicio, p_fin: S.semana.fecha_fin, p_tareas: payloadFilas() });
     S.pendiente = false;
     S.semanas = [];
     const fallidas = await aplicarCumplimientoPrecargado(conCumpl);
     borrarCumplLocal();
     toast(fallidas
-      ? `Planificación confirmada. ${fallidas} ${fallidas === 1 ? 'tarea quedó' : 'tareas quedaron'} sin el cumplimiento precargado: cargalo a mano.`
+      ? `Planificación confirmada. ${fallidas} ${fallidas === 1 ? 'tarea quedó' : 'tareas quedaron'} sin el cumplimiento o las horas reales precargadas: cargalos a mano.`
       : 'Planificación confirmada.', !!fallidas);
     await abrirSemana(S.semana.fecha_inicio, S.semana.fecha_fin);
   } catch (e) {
@@ -1039,7 +1052,7 @@ $app.addEventListener('input', (e) => {
     const f = fila && S.filas.find((x) => x.uid === fila.dataset.uid);
     if (!f) return;
     f[el.dataset.campo] = el.value;
-    if (el.dataset.campo === 'horas') {
+    if (el.dataset.campo === 'horas' || el.dataset.campo === 'horas_reales') {
       const h = num(el.value);
       el.setAttribute('aria-invalid', Number.isNaN(h) || (h !== null && h < 0) ? 'true' : 'false');
     }
