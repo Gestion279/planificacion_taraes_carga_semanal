@@ -655,6 +655,15 @@ function cumplimientoDe(lista) {
   const peso = ev.reduce((s, t) => s + pesoTarea(t), 0);
   return Math.round(ev.reduce((s, t) => s + Number(t.cumplimiento) * pesoTarea(t), 0) / peso);
 }
+// Horas planificadas cumplidas: horas planificadas de cada tarea por su porcentaje de cumplimiento.
+// Solo tareas planificadas. Sin evaluar o reprogramadas suman 0.
+function horasCumplidas(lista) {
+  return lista.filter((t) => !t.no_planificada).reduce((s, t) => {
+    const h = Number(t.horas_planificadas) || 0;
+    const p = /^[0-9]+$/.test(String(t.cumplimiento ?? '')) ? Number(t.cumplimiento) : 0;
+    return s + h * p / 100;
+  }, 0);
+}
 function chipPct(p) {
   if (p === null) return '<span class="pct" style="background:var(--gris-chip)">—</span>';
   const [bg, fg] = p < 25 ? ['var(--rojo)', '#fff'] : p < 50 ? ['var(--naranja)', 'var(--tinta)'] : p < 75 ? ['var(--amarillo)', 'var(--tinta)'] : ['var(--verde)', '#fff'];
@@ -726,6 +735,7 @@ function vistaCumplimiento() {
   const delDia = tareas.filter((t) => t.fecha === dia);
   const plan = tareas.reduce((s, t) => s + (Number(t.horas_planificadas) || 0), 0);
   const reales = tareas.reduce((s, t) => s + (Number(t.horas_reales) || 0), 0);
+  const cumplidas = horasCumplidas(tareas);
   const sinEval = tareas.filter((t) => !t.cumplimiento).length;
   const np = tareas.filter((t) => t.no_planificada);
   const c = cumplimientoDe(tareas);
@@ -741,6 +751,7 @@ function vistaCumplimiento() {
     </div>
     <div class="resumen">
       <div class="tarjeta"><span class="t">Horas planificadas</span><span class="v">${fmtH(plan)}</span><span class="n">De ${fmtH(Number(S.sesion.jornada_horas) || 44)} semanales</span></div>
+      <div class="tarjeta"><span class="t">Horas planificadas cumplidas</span><span class="v">${fmtH(cumplidas)}</span><span class="n">${plan > 0 ? `${Math.round(cumplidas / plan * 100)}% de lo planificado` : 'Sin horas planificadas'}</span></div>
       <div class="tarjeta"><span class="t">Horas reales</span><span class="v">${fmtH(reales)}</span><span class="n">Cargadas hasta ahora</span></div>
       <div class="tarjeta"><span class="t">Cumplimiento</span><span class="v">${c === null ? '—' : c + '%'}</span><span class="n">Ponderado por horas, sobre lo evaluado</span></div>
       <div class="tarjeta"><span class="t">Sin evaluar</span><span class="v">${sinEval} ${sinEval === 1 ? 'tarea' : 'tareas'}</span><span class="n">Quedan vacías si no se completan</span></div>
@@ -759,7 +770,7 @@ function vistaCumplimiento() {
       <section class="panel" aria-labelledby="t-dia">
         <div class="panel-cab">
           <h2 id="t-dia">${nombreDia(dia)}</h2>
-          <span>Planificado <strong>${fmtH(delDia.reduce((s, t) => s + (Number(t.horas_planificadas) || 0), 0))}</strong> · Real <strong>${fmtH(delDia.reduce((s, t) => s + (Number(t.horas_reales) || 0), 0))}</strong></span>
+          <span>Planificado <strong>${fmtH(delDia.reduce((s, t) => s + (Number(t.horas_planificadas) || 0), 0))}</strong> · Planificado cumplido <strong>${fmtH(horasCumplidas(delDia))}</strong> · Real <strong>${fmtH(delDia.reduce((s, t) => s + (Number(t.horas_reales) || 0), 0))}</strong></span>
         </div>
         ${delDia.length ? delDia.map(filaCumplimientoHtml).join('') : S.npAbierto ? '' : `
         <div class="tarjeta dia-vacio">
