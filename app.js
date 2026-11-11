@@ -300,15 +300,41 @@ async function abrirSemana(ini, fin, mantenerDia = false) {
   }
 }
 const diasSemana = () => rango(S.semana.fecha_inicio, S.semana.fecha_fin);
-const filaVacia = (fecha) => ({ uid: uid(), fecha, accion_id: '', detalle: '', prioridad: '', horas: '', recursos: '', riesgos: '', abierta: false });
+const filaVacia = (fecha) => ({ uid: uid(), fecha, accion_id: '', detalle: '', prioridad: '', horas: '', recursos: '', riesgos: '', cumplimiento: '', abierta: false });
+/* Cumplimiento precargado en el borrador (por ejemplo, el que traen las tareas copiadas de otra semana).
+   Solo se aceptan porcentajes: una tarea copiada empieza la semana nueva, no puede venir "reprogramada".
+   Se guarda también en este navegador por si la base no conserva ese dato en el borrador. */
+const PCT_VALIDOS = ['0', '25', '50', '75', '100'];
+const pctValido = (v) => (PCT_VALIDOS.includes(String(v ?? '')) ? String(v) : '');
+const claveFila = (f) => `${f.fecha}|${f.accion_id || ''}|${String(f.detalle || '').trim()}`;
+const claveCumplLocal = () => `cargaSemanal.cumplBorrador.${correo()}.${S.semana.fecha_inicio}`;
+function guardarCumplLocal() {
+  try {
+    const mapa = {};
+    S.filas.filter((f) => f.cumplimiento && filaConDatos(f)).forEach((f) => { (mapa[claveFila(f)] = mapa[claveFila(f)] || []).push(f.cumplimiento); });
+    if (Object.keys(mapa).length) localStorage.setItem(claveCumplLocal(), JSON.stringify(mapa));
+    else localStorage.removeItem(claveCumplLocal());
+  } catch { /* sin almacenamiento */ }
+}
+function leerCumplLocal() {
+  try { const t = localStorage.getItem(claveCumplLocal()); return t ? JSON.parse(t) : {}; } catch { return {}; }
+}
+function borrarCumplLocal() { try { localStorage.removeItem(claveCumplLocal()); } catch { /* nada */ } }
 const filaConDatos = (f) => !!(f.accion_id || (f.detalle || '').trim() || String(f.horas || '').trim() || (f.recursos || '').trim() || (f.riesgos || '').trim());
 function prepararFilas(sem) {
   const dias = rango(sem.fecha_inicio, sem.fecha_fin);
   const filas = (sem.tareas || []).filter((t) => dias.includes(t.fecha)).map((t) => ({
     uid: uid(), fecha: t.fecha, accion_id: t.accion_id ? String(t.accion_id) : '', detalle: t.detalle || '',
     prioridad: t.prioridad || '', horas: t.horas ?? '', recursos: t.recursos || '', riesgos: t.riesgos || '',
+    cumplimiento: pctValido(t.cumplimiento),
     abierta: !!((t.recursos || '').trim() || (t.riesgos || '').trim())
   }));
+  // Si la base no devolvió el cumplimiento precargado, se recupera del guardado local
+  const local = leerCumplLocal();
+  filas.forEach((f) => {
+    const cola = local[claveFila(f)];
+    if (!f.cumplimiento && cola && cola.length) f.cumplimiento = pctValido(cola.shift());
+  });
   dias.forEach((d) => completarDia(filas, d));
   return filas;
 }
@@ -348,6 +374,12 @@ function filaBorradorHtml(f, i) {
       </label>
       <label class="campo f-horas">Horas
         <input class="in" type="text" inputmode="decimal" data-campo="horas" value="${esc(f.horas)}" placeholder="0" autocomplete="off">
+      </label>
+      <label class="campo f-cumpl">Cumplimiento
+        <select class="in" data-campo="cumplimiento">
+          <option value="">Sin informar</option>
+          ${PCT_VALIDOS.map((v) => `<option value="${v}" ${v === f.cumplimiento ? 'selected' : ''}>${v}%</option>`).join('')}
+        </select>
       </label>
       <button type="button" class="btn-icono" data-accion="quitar-fila" aria-label="Quitar tarea ${i + 1}">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>
@@ -441,6 +473,7 @@ function marcarEstadoGuardado() {
 }
 function cambioBorrador() {
   S.pendiente = true;
+  guardarCumplLocal();
   marcarEstadoGuardado();
   clearTimeout(S.timer);
   S.timer = setTimeout(() => guardarBorrador(), CONFIG.esperaGuardado);
@@ -448,7 +481,8 @@ function cambioBorrador() {
 function payloadFilas() {
   return S.filas.filter(filaConDatos).map((f) => ({
     fecha: f.fecha, accion_id: f.accion_id ? Number(f.accion_id) : '', detalle: f.detalle.trim(),
-    prioridad: f.prioridad, horas: String(f.horas).trim(), recursos: f.recursos.trim(), riesgos: f.riesgos.trim()
+    prioridad: f.prioridad, horas: String(f.horas).trim(), recursos: f.recursos.trim(), riesgos: f.riesgos.trim(),
+    cumplimiento: f.cumplimiento || null
   }));
 }
 async function guardarBorrador(avisar = false) {
@@ -537,6 +571,7 @@ async function copiarSemana() {
       (porDia[destino] = porDia[destino] || []).push({
         uid: uid(), fecha: destino, accion_id: t.accion_id ? String(t.accion_id) : '', detalle: t.detalle || '',
         prioridad: t.prioridad || '', horas: t.horas_planificadas ?? t.horas ?? '', recursos: t.recursos || '', riesgos: t.riesgos || '',
+        cumplimiento: pctValido(t.cumplimiento),
         abierta: !!((t.recursos || '').trim() || (t.riesgos || '').trim())
       });
     });
@@ -545,8 +580,33 @@ async function copiarSemana() {
     if (!total) return toast('Esa semana no tiene tareas que coincidan con los días elegidos.');
     cambioBorrador(); vistaBorrador();
     const sinAccion = Object.values(porDia).flat().filter((f) => !f.accion_id).length;
-    toast(`Se copiaron ${total} tareas.${sinAccion ? ` ${sinAccion} no tienen acción: elegila antes de confirmar.` : ''}`);
+    const conCumpl = Object.values(porDia).flat().filter((f) => f.cumplimiento).length;
+    toast(`Se copiaron ${total} tareas.${conCumpl ? ` ${conCumpl} traen el cumplimiento de esa semana: podés cambiarlo.` : ''}${sinAccion ? ` ${sinAccion} no tienen acción: elegila antes de confirmar.` : ''}`);
   } catch (e) { toast(e.message, true); }
+}
+// Después de confirmar, pasa a cada tarea el cumplimiento elegido en el borrador.
+// Las tareas confirmadas se reconocen por día, acción y detalle. Devuelve cuántas no se pudieron actualizar.
+async function aplicarCumplimientoPrecargado(filas) {
+  if (!filas.length) return 0;
+  let fallidas = 0;
+  try {
+    const sem = await rpc('cargar_semana', { p_correo: correo(), p_inicio: S.semana.fecha_inicio, p_fin: S.semana.fecha_fin });
+    const libres = (sem.tareas || []).filter((t) => !t.no_planificada);
+    for (const f of filas) {
+      const i = libres.findIndex((t) => claveFila({ fecha: t.fecha, accion_id: t.accion_id, detalle: t.detalle }) === claveFila(f));
+      if (i < 0) { fallidas++; continue; }
+      const t = libres.splice(i, 1)[0];
+      if (String(t.cumplimiento ?? '') === f.cumplimiento) continue;
+      try {
+        await rpc('cargar_actualizar_tarea', {
+          p_correo: correo(), p_id: t.id, p_prioridad: t.prioridad || null,
+          p_horas_reales: t.horas_reales === '' || t.horas_reales === undefined ? null : t.horas_reales,
+          p_cumplimiento: f.cumplimiento
+        });
+      } catch { fallidas++; }
+    }
+  } catch { fallidas = filas.length; }
+  return fallidas;
 }
 async function confirmarSemana() {
   const conAccion = S.filas.filter((f) => f.accion_id);
@@ -562,6 +622,7 @@ async function confirmarSemana() {
     titulo: 'Confirmar la planificación',
     cuerpo: `<p>Vas a confirmar <strong>${conAccion.length} ${conAccion.length === 1 ? 'tarea' : 'tareas'}</strong> por <strong>${fmtH(horasDe(conAccion))}</strong> para la semana del ${ddmm(S.semana.fecha_inicio)} al ${ddmm(S.semana.fecha_fin)}.</p>
       <p>Después vas a poder agregar tareas no planificadas y cambiar la importancia, pero no modificar ni quitar estas tareas.</p>
+      ${conAccion.some((f) => f.cumplimiento) ? `<p>${conAccion.filter((f) => f.cumplimiento).length} ${conAccion.filter((f) => f.cumplimiento).length === 1 ? 'tarea tiene' : 'tareas tienen'} cumplimiento precargado. Lo vas a poder cambiar durante la semana.</p>` : ''}
       ${sinAccion.length ? `<p class="error-texto">${sinAccion.length} ${sinAccion.length === 1 ? 'tarea tiene' : 'tareas tienen'} datos pero no tienen acción, y no se van a guardar.</p>` : ''}`,
     ok: 'Confirmar planificación'
   });
@@ -569,10 +630,15 @@ async function confirmarSemana() {
   clearTimeout(S.timer);
   try {
     cargando('Confirmando la planificación…');
+    const conCumpl = conAccion.filter((f) => f.cumplimiento);
     await rpc('cargar_confirmar', { p_correo: correo(), p_inicio: S.semana.fecha_inicio, p_fin: S.semana.fecha_fin, p_tareas: payloadFilas() });
     S.pendiente = false;
     S.semanas = [];
-    toast('Planificación confirmada.');
+    const fallidas = await aplicarCumplimientoPrecargado(conCumpl);
+    borrarCumplLocal();
+    toast(fallidas
+      ? `Planificación confirmada. ${fallidas} ${fallidas === 1 ? 'tarea quedó' : 'tareas quedaron'} sin el cumplimiento precargado: cargalo a mano.`
+      : 'Planificación confirmada.', !!fallidas);
     await abrirSemana(S.semana.fecha_inicio, S.semana.fecha_fin);
   } catch (e) {
     vistaBorrador();
