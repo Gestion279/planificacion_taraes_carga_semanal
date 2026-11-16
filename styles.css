@@ -104,6 +104,7 @@ select.in { padding-right: 28px; }
 .chip-borrador { background: var(--activo); color: var(--cobre-oscuro); }
 .chip-curso { background: var(--gris-chip); color: var(--tinta); }
 .chip-cerrada { background: var(--verde-fondo); color: var(--verde-tinta); }
+.chip-sinplan { background: var(--aviso-fondo); color: var(--aviso-tinta); }
 .chip-np { background: var(--aviso-fondo); color: var(--aviso-tinta); font-size: 12px; padding: 2px 8px; }
 .error-texto { color: var(--error); font-size: 14px; }
 

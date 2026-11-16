@@ -44,6 +44,8 @@ const sumarDias = (s, n) => { const d = aFecha(s); d.setDate(d.getDate() + n); r
 const ddmm = (s) => { const d = aFecha(s); return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`; };
 const lunesDe = (s) => { const d = aFecha(s); const w = (d.getDay() + 6) % 7; d.setDate(d.getDate() - w); return aIso(d); };
 const hoyIso = () => aIso(new Date());
+// Una semana ya pasada (anterior a la semana actual) no se puede planificar: solo admite tareas no planificadas.
+const semanaPasada = (s) => lunesDe(s) < lunesDe(hoyIso());
 const nombreDia = (s) => `${DIAS[aFecha(s).getDay()]} ${ddmm(s)}`;
 const cortoDia = (s) => `${DIAS_CORTO[aFecha(s).getDay()]} ${String(aFecha(s).getDate()).padStart(2, '0')}`;
 const rango = (a, b) => { const out = []; let x = a; while (x <= b && out.length < 7) { out.push(x); x = sumarDias(x, 1); } return out; };
@@ -198,16 +200,20 @@ async function ingresar(form) {
 
 /* ---------- mis semanas ---------- */
 function estadoSemana(s) {
-  if (s.estado === 'borrador') return { texto: 'Borrador', clase: 'chip-borrador' };
+  if (s.estado === 'borrador') return semanaPasada(s.fecha_inicio) ? { texto: 'Sin planificar', clase: 'chip-sinplan' } : { texto: 'Borrador', clase: 'chip-borrador' };
   const hoy = hoyIso();
   if (s.fecha_inicio > hoy) return { texto: 'Confirmada', clase: 'chip-curso' };
   if (s.fecha_fin >= hoy || s.lunes === lunesDe(hoy)) return { texto: 'En curso', clase: 'chip-curso' };
   return { texto: 'Cerrada', clase: 'chip-cerrada' };
 }
 function detalleSemana(s) {
-  if (s.estado === 'borrador') return `${s.tareas} ${s.tareas === 1 ? 'tarea' : 'tareas'} · ${fmtH(s.horas)} planificadas`;
+  if (s.estado === 'borrador') {
+    if (semanaPasada(s.fecha_inicio)) return 'La semana ya pasó: solo admite tareas no planificadas';
+    return `${s.tareas} ${s.tareas === 1 ? 'tarea' : 'tareas'} · ${fmtH(s.horas)} planificadas`;
+  }
   const partes = [];
   if (s.origen === 'excel') partes.push('Cargada por Excel');
+  else if (s.origen === 'sin_planificacion') partes.push('Sin planificación');
   else if (s.confirmada_at) partes.push(`Confirmada el ${ddmm(aIso(new Date(s.confirmada_at)))}`);
   if (s.sin_cumplimiento > 0) partes.push(`${s.sin_cumplimiento} sin cumplimiento`);
   if (s.cumplimiento !== null && s.cumplimiento !== undefined) partes.push(`Cumplimiento ${s.cumplimiento}%`);
@@ -290,7 +296,12 @@ async function abrirSemana(ini, fin, mantenerDia = false) {
   const mismo = S.semana && S.semana.fecha_inicio === sem.fecha_inicio;
   S.semana = sem;
   if (!(mantenerDia && mismo)) { S.dia = 0; S.npAbierto = false; }
-  if (sem.estado === 'borrador') {
+  if (sem.estado === 'borrador' && semanaPasada(sem.fecha_inicio)) {
+    // Semana anterior sin planificación confirmada: no se ofrece el borrador, solo cargar tareas no planificadas.
+    S.semana = { ...sem, estado: 'sin_planificar', origen: 'sin_planificacion', tareas: [] };
+    if (!(mantenerDia && mismo)) S.dia = Math.max(0, diasCumplimiento().indexOf(S.semana.fecha_inicio));
+    vistaCumplimiento();
+  } else if (sem.estado === 'borrador') {
     S.guardadoAt = sem.guardado_at;
     S.filas = prepararFilas(sem);
     vistaBorrador();
@@ -560,7 +571,7 @@ async function copiarSemana() {
   if (!semanas.length) {
     try { semanas = S.semanas = await rpc('cargar_mis_semanas', { p_correo: correo() }); } catch (e) { return toast(e.message, true); }
   }
-  const previas = semanas.filter((s) => s.fecha_inicio !== S.semana.fecha_inicio && s.tareas > 0);
+  const previas = semanas.filter((s) => s.fecha_inicio !== S.semana.fecha_inicio && s.tareas > 0 && s.origen !== 'sin_planificacion');
   if (!previas.length) return toast('No hay semanas anteriores para copiar.');
   const r = await dialogo({
     titulo: 'Copiar una semana anterior',
@@ -752,14 +763,17 @@ function vistaCumplimiento() {
   const sinEval = tareas.filter((t) => !t.cumplimiento).length;
   const np = tareas.filter((t) => t.no_planificada);
   const c = cumplimientoDe(tareas);
-  const chip = sem.origen === 'excel' ? 'Cargada por Excel' : sem.confirmada_at ? `Confirmada el ${fechaHora(sem.confirmada_at)}` : 'Confirmada';
+  const sinPlan = sem.origen === 'sin_planificacion';
+  const chip = sinPlan ? 'Sin planificación' : sem.origen === 'excel' ? 'Cargada por Excel' : sem.confirmada_at ? `Confirmada el ${fechaHora(sem.confirmada_at)}` : 'Confirmada';
   const hoy = hoyIso();
   marco(`
   <main class="contenido">
     <div class="encabezado">
       <div class="titulo">
-        <div><h1>Semana del ${ddmm(sem.fecha_inicio)} al ${ddmm(sem.fecha_fin)}</h1><span class="chip chip-curso">${esc(chip)}</span></div>
-        <span class="sub">Cargá las horas reales y cuánto se cumplió de cada tarea. Los cambios se guardan solos.</span>
+        <div><h1>Semana del ${ddmm(sem.fecha_inicio)} al ${ddmm(sem.fecha_fin)}</h1><span class="chip ${sinPlan ? 'chip-sinplan' : 'chip-curso'}">${esc(chip)}</span></div>
+        <span class="sub">${sinPlan
+          ? 'Esta semana ya pasó y no se planificó, así que no se puede cargar una planificación. Agregá lo que hiciste como tareas no planificadas.'
+          : 'Cargá las horas reales y cuánto se cumplió de cada tarea. Los cambios se guardan solos.'}</span>
       </div>
     </div>
     <div class="resumen">
@@ -777,7 +791,7 @@ function vistaCumplimiento() {
           const ev = l.filter((t) => t.cumplimiento).length;
           return `<button type="button" class="dia" data-accion="dia" data-i="${i}" aria-current="${i === S.dia}">
             <span class="nombre"><span>${window.innerWidth <= 760 ? cortoDia(d) : nombreDia(d)}</span>${chipPct(cumplimientoDe(l))}</span>
-            <span class="res">${l.length ? `${ev} de ${l.length} evaluadas` : 'Sin tareas planificadas'}</span></button>`;
+            <span class="res">${l.length ? `${ev} de ${l.length} evaluadas` : sinPlan ? 'Sin tareas' : 'Sin tareas planificadas'}</span></button>`;
         }).join('')}
       </nav>
       <section class="panel" aria-labelledby="t-dia">
@@ -787,12 +801,12 @@ function vistaCumplimiento() {
         </div>
         ${delDia.length ? delDia.map(filaCumplimientoHtml).join('') : S.npAbierto ? '' : `
         <div class="tarjeta dia-vacio">
-          <strong>No se planificaron tareas para este día</strong>
-          <p>Si trabajaste en algo, cargalo como tarea no planificada. Va a sumar a las horas reales y al cumplimiento de la semana.</p>
+          <strong>${sinPlan ? 'Todavía no cargaste tareas para este día' : 'No se planificaron tareas para este día'}</strong>
+          <p>${sinPlan ? 'Esta semana no tiene planificación. Cargá cada cosa que hiciste como tarea no planificada.' : 'Si trabajaste en algo, cargalo como tarea no planificada. Va a sumar a las horas reales y al cumplimiento de la semana.'}</p>
           <button type="button" class="btn btn-p" data-accion="abrir-np">+ Agregar tarea no planificada</button>
         </div>`}
         ${S.npAbierto ? formularioNoPlanificada() : delDia.length ? `<div class="herramientas"><button type="button" class="btn btn-linea" data-accion="abrir-np" ${dia > hoy ? 'title="Podés agregarla aunque el día no haya llegado"' : ''}>+ Agregar tarea no planificada</button></div>` : ''}
-        <p class="nota-fija">La acción, el detalle y las horas planificadas no se pueden cambiar después de confirmar.</p>
+        ${sinPlan ? '' : '<p class="nota-fija">La acción, el detalle y las horas planificadas no se pueden cambiar después de confirmar.</p>'}
       </section>
     </div>
   </main>`, 'semanas');
